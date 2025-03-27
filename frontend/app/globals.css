@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0% 0%;
+  --foreground: 210 40% 98%;
+  --card: 0 0% 10%;
+  --card-foreground: 210 40% 98%;
+  --popover: 0 0% 10%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 217.2 91.2% 59.8%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 217.2 32.6% 17.5%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 217.2 32.6% 17.5%;
+  --muted-foreground: 215 20.2% 65.1%;
+  --accent: 217.2 32.6% 17.5%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 217.2 32.6% 17.5%;
+  --input: 217.2 32.6% 17.5%;
+  --ring: 224.3 76.3% 48%;
+}
+
+body {
+  @apply bg-background text-foreground;
+}
+
+@layer components {
+  /* Background styles */
+  .app-gradient-bg {
+    @apply bg-gradient-to-b from-black to-gray-900;
+  }
+
+  /* Card styles */
+  .app-card {
+    @apply bg-gradient-to-br from-black to-slate-800 border-white/10 shadow-xl;
+  }
+
+  .app-card-header {
+    @apply border-b border-white/10;
+  }
+
+  /* Text styles */
+  .app-title {
+    @apply text-2xl md:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500;
+  }
+
+  .app-description {
+    @apply text-gray-400 text-left text-sm;
+  }
+
+  /* Table styles */
+  .app-table-container {
+    @apply bg-white/5 rounded-lg border border-white/10 overflow-hidden;
+  }
+
+  .app-table-row {
+    @apply border-white/10 hover:bg-white/5 transition-colors;
+  }
+
+  .app-table-header {
+    @apply text-blue-400;
+  }
+
+  /* Badge styles */
+  .app-badge {
+    @apply bg-white/10 text-blue-400 px-2 py-1 rounded-full text-xs;
+  }
+
+  /* Form styles */
+  .app-input {
+    @apply bg-black/30 border-white/20 text-white placeholder:text-gray-500;
+  }
+
+  /* Section styles */
+  .app-section {
+    @apply bg-white/5 rounded-lg p-4 border border-white/10;
+  }
+}
+
