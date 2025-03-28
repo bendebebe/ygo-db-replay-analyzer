@@ -82,6 +82,8 @@ export const GET_SESSION_DETAILS = gql`
       replayAnalysis {
         id
         replayUrl
+        createdAt
+        dbCreatedAt
         player1 {
           id
           dbName

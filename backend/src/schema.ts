@@ -55,6 +55,7 @@ const typeDefs = /* GraphQL */ `
     user: User
     decks: [Deck!]!
     rpsChoices: [RpsChoice!]!
+    dbCreatedAt: String
     createdAt: String!
     updatedAt: String!
   }
@@ -119,7 +120,7 @@ const typeDefs = /* GraphQL */ `
   type ReplaySessionPlayer {
     id: ID!
     dbName: String!
-    rpsData: RpsData
+    rpsData: [RpsData!]!
     decks: [ReplayDeck!]!
   }
 
@@ -150,6 +151,8 @@ const typeDefs = /* GraphQL */ `
     replayUrl: String!
     player1: ReplaySessionPlayer!
     player2: ReplaySessionPlayer!
+    dbCreatedAt: String
+    createdAt: Date!
   }
 
   type SessionDetails {
@@ -218,7 +221,7 @@ const typeDefs = /* GraphQL */ `
     deleteReplay(id: ID!): Replay!
     deletePlayer(id: ID!): Player!
     deleteDeck(id: ID!): Deck!
-    submitReplayJobs(urls: [String!]!, sessionId: String): [ID!]!
+    submitReplayJobs(urls: [String!]!, sessionId: String): String!
     submitReplayJobsForced(urls: [String!]!, sessionId: String): [ID!]!
     deleteAllReplays: DeleteAllReplaysResponse!
     clearRedisCache: CacheOperationResult!

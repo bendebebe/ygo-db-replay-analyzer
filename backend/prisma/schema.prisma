@@ -63,6 +63,7 @@ model Replay {
   winner         Player?     @relation("Winner", fields: [winnerPlayerId], references: [id])
   decks          Deck[]
   rpsChoices     RpsChoice[]
+  dbCreatedAt    DateTime?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
   deletedAt      DateTime?

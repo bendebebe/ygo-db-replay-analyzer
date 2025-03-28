@@ -32,13 +32,15 @@ export interface RpsData {
 export interface ReplaySessionPlayer {
   id: string;
   dbName: string;
-  rpsData: RpsData | null;
+  rpsData: RpsData[] | null;
   decks: ReplayDeck[];
 }
 
 export interface ReplayAnalysis {
   id: string;
   replayUrl: string;
+  createdAt: string;
+  dbCreatedAt: string;
   player1: ReplaySessionPlayer;
 }
 
