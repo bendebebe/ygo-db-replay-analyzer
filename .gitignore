@@ -58,3 +58,5 @@ pgdata/
 *.tmp
 *.temp
 .cache
+
+.cursorignore

@@ -18,7 +18,7 @@ export interface ReplayPlayer {
         playerId: string;
         choice: string;
         won: boolean;
-    };
+    }[];
     decks: ReplayDeck[];
 }
 
@@ -31,7 +31,7 @@ export interface ReplayResponse {
 
 export interface PlayerData {
     dbName: string;
-    rpsData: RpsChoiceData;
+    rpsData: RpsChoiceData[];
     decks: DeckData[];
 }
 

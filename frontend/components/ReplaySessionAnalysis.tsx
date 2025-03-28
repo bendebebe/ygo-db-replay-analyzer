@@ -102,14 +102,17 @@ export function ReplaySessionAnalysis({ replayResponse, isExpanded = true }: Rep
 
   // Add logging when deck is passed to DeckDisplay
   const renderDeckDisplay = (replayResponsePlayer: ReplayPlayer, activeGame: number) => {
-    // Removed all console.log statements for deck rendering
+    // Get the winning RPS data (usually the last one)
+    const winningRpsData = replayResponsePlayer.rpsData && replayResponsePlayer.rpsData.length > 0
+      ? replayResponsePlayer.rpsData[replayResponsePlayer.rpsData.length - 1]
+      : null;
     
     // Filter decks by gameNumber
     const playerData: ReplayDeck[] = replayResponsePlayer.decks.map(deck => ({
       id: deck.id,
       name: deck.name,
       gameNumber: deck.gameNumber,
-      playerId: replayResponsePlayer.rpsData.playerId,
+      playerId: winningRpsData?.playerId || '',
       cards: deck.cards.map(card => ({
         ...card,
         name: card.ygoInfo.name

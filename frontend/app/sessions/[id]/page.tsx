@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useQuery } from '@apollo/client'
 import { GET_SESSION_DETAILS } from '@/lib/graphql/queries/sessions'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { ReplaySessionAnalysis } from '@/components/ReplaySessionAnalysis'
 import { ReplayResponse } from '@/lib/graphql/types/replays'
 import { YgoCardInfo } from '@/lib/graphql/types/cards'
+import { ReplayOverviewTable } from '@/components/ReplayOverviewTable'
 
 // Define interfaces for our optimized session data
 interface ReplayCard {
@@ -37,13 +38,15 @@ interface RpsData {
 interface ReplayPlayer {
   id: string;
   dbName: string;
-  rpsData: RpsData | null;
+  rpsData: RpsData[] | null;
   decks: ReplayDeck[];
 }
 
 interface ReplayAnalysis {
   id: string;
   replayUrl: string;
+  createdAt: string;
+  dbCreatedAt: string;
   player1: ReplayPlayer;
   player2: ReplayPlayer;
 }
@@ -54,6 +57,7 @@ interface SessionDetails {
   isPublic: boolean;
   shareableId: string | null;
   createdAt: string;
+  dbCreatedAt: string;
   updatedAt: string;
   replayAnalysis: ReplayAnalysis[];
 }
@@ -65,11 +69,25 @@ export default function SessionDetail() {
   
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('overview');
+  const [debugInfo, setDebugInfo] = useState<{ message: string, count: number } | null>(null);
 
   const { data, loading, error } = useQuery(GET_SESSION_DETAILS, {
     variables: { id: sessionId },
     fetchPolicy: 'no-cache'
   });
+
+  // Add debug useEffect
+  useEffect(() => {
+    if (data?.sessionDetails?.replayAnalysis) {
+      setDebugInfo({
+        message: "Replay data loaded",
+        count: data.sessionDetails.replayAnalysis.length
+      });
+
+      // Log the structure to check for issues
+      console.log('First replay structure:', data.sessionDetails.replayAnalysis[0]);
+    }
+  }, [data]);
 
   if (loading) {
     return (
@@ -101,22 +119,44 @@ export default function SessionDetail() {
     )
   }
 
-  const session: SessionDetails = data.sessionDetails
-  const { replayAnalysis } = session
+  const session: SessionDetails = data.sessionDetails;
+  const { replayAnalysis } = session;
   
   // Format date correctly - handles ISO strings, Unix timestamps in seconds or milliseconds
-  let formattedDate = "Invalid date"
+  let formattedDate = "Invalid date";
   
-  if (session.createdAt) {
-    const timestamp = Number(session.createdAt);
+  if (session.dbCreatedAt) {
+    const timestamp = Number(session.dbCreatedAt);
     const date = !isNaN(timestamp) 
       ? new Date(timestamp < 10000000000 ? timestamp * 1000 : timestamp) 
-      : new Date(session.createdAt);
+      : new Date(session.dbCreatedAt);
       
     if (!isNaN(date.getTime())) {
       formattedDate = date.toLocaleString();
     }
   }
+
+  // Adapting replayAnalysis to match the expected format in ReplayOverviewTable
+  // This is likely the key fix - ensuring the data structure matches what ReplayOverviewTable expects
+  const adaptedReplays = replayAnalysis.map(replay => {
+    // Transform to ensure it matches the expected structure
+    return {
+      id: replay.id,
+      replayUrl: replay.replayUrl,
+      createdAt: replay.createdAt,
+      dbCreatedAt: replay.dbCreatedAt,
+      player1: {
+        id: replay.player1.id,
+        dbName: replay.player1.dbName,
+        rpsData: replay.player1.rpsData
+      },
+      player2: {
+        id: replay.player2.id,
+        dbName: replay.player2.dbName,
+        rpsData: replay.player2.rpsData
+      }
+    };
+  });
 
   // Map the replay analysis data to the format expected by ReplaySessionAnalysis
   const replayResponses: ReplayResponse[] = replayAnalysis.map((replay: ReplayAnalysis) => {
@@ -124,11 +164,7 @@ export default function SessionDetail() {
       url: replay.replayUrl,
       player1: {
         dbName: replay.player1.dbName,
-        rpsData: {
-          playerId: replay.player1.id,
-          choice: replay.player1.rpsData?.choice || '',
-          won: replay.player1.rpsData?.won || false
-        },
+        rpsData: replay.player1.rpsData || [],
         decks: replay.player1.decks.map(deck => ({
           ...deck,
           cards: deck.cards.map(card => ({
@@ -139,11 +175,7 @@ export default function SessionDetail() {
       },
       player2: {
         dbName: replay.player2.dbName,
-        rpsData: {
-          playerId: replay.player2.id,
-          choice: replay.player2.rpsData?.choice || '',
-          won: replay.player2.rpsData?.won || false
-        },
+        rpsData: replay.player2.rpsData || [],
         decks: replay.player2.decks.map(deck => ({
           ...deck,
           cards: deck.cards.map(card => ({
@@ -167,7 +199,7 @@ export default function SessionDetail() {
             <p className="text-gray-400 mt-2">Created: {formattedDate}</p>
           </div>
           <Button 
-            onClick={() => router.back()} 
+            onClick={() => router.push('/sessions')} 
             variant="outline"
             size="sm"
           >
@@ -226,60 +258,32 @@ export default function SessionDetail() {
           <Card className="bg-black border-white/20">
             <CardHeader>
               <CardTitle className="text-xl font-bold text-white">Replays</CardTitle>
+              {debugInfo && (
+                <div className="mt-2 text-sm text-gray-400">
+                  Debug: {debugInfo.message} ({debugInfo.count} replays)
+                </div>
+              )}
             </CardHeader>
             <CardContent>
-              {replayAnalysis.length > 0 ? (
-                <div className="divide-y divide-gray-800">
-                  {replayAnalysis.map(replay => (
-                    <div key={replay.id} className="py-4 first:pt-0 last:pb-0">
-                      <div className="flex flex-col md:flex-row gap-4 justify-between">
-                        <div>
-                          <h3 className="font-semibold text-white">
-                            {replay.player1.dbName} vs {replay.player2.dbName}
-                          </h3>
-                          <a
-                            href={replay.replayUrl}
-                            className="text-blue-400 hover:underline text-sm"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            {replay.replayUrl}
-                          </a>
-                        </div>
-                        <div className="text-right">
-                          <span className="bg-green-900 text-green-300 text-sm py-1 px-2 rounded">
-                            Winner: {
-                              (replay.player1.rpsData && replay.player1.rpsData.won) 
-                                ? replay.player1.dbName 
-                                : replay.player2.dbName
-                            }
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-gray-400">No replays found for this session.</p>
-              )}
+              {/* Use the adapted replay data that matches the component's expected structure */}
+              <ReplayOverviewTable replays={adaptedReplays} />
+              
+              {/* Debug panel to show loaded data structure */}
+              <div className="mt-4 p-4 bg-gray-900 rounded-lg">
+                <h4 className="text-sm font-medium text-white mb-2">Data Structure:</h4>
+                <p className="text-xs text-gray-400 whitespace-pre-wrap overflow-auto max-h-24">
+                  {replayAnalysis?.length ?? 0} replays available
+                </p>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
         
-        <TabsContent value="analysis" className="space-y-4">
-          {replayResponses.length > 0 ? (
-            <ReplaySessionAnalysis 
-              replayResponse={replayResponses}
-              sessionId={sessionId}
-              isExpanded={true}
-            />
-          ) : (
-            <Card className="bg-black border-white/20">
-              <CardContent className="p-6">
-                <p className="text-gray-400">No replay data available for analysis.</p>
-              </CardContent>
-            </Card>
-          )}
+        <TabsContent value="analysis">
+          <ReplaySessionAnalysis 
+            replayResponse={replayResponses} 
+            sessionId={sessionId} 
+          />
         </TabsContent>
       </Tabs>
     </div>

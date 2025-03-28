@@ -1,6 +1,6 @@
 import puppeteer, { Browser, Page } from 'puppeteer';
 import { prisma } from '../lib/prisma'
-import { DeckAnalysis, DeckAnalysisPlayer, PlayerRPSTracker } from '../resolvers/decks/types'
+import { DeckAnalysis, DeckAnalysisPlayer } from '../resolvers/decks/types'
 import { RPSPlay } from '../resolvers/replays/types'
 import { PlayerInfo } from '../resolvers/players/types'
 import { fetchYGOCardInfo, YGOCard } from './ygoCardService';
@@ -16,7 +16,7 @@ interface PlayerRPSData {
 
 interface PlayerData {
   dbName: string;
-  rpsData: PlayerRPSData;
+  rpsData: PlayerRPSData[];
   decks: DeckWithCards[];
 }
 
@@ -26,6 +26,7 @@ interface ReplayResponse {
   player2?: PlayerData;
   error?: string;
   performance?: Record<string, number>;
+  dbCreatedAt?: Date;
 }
 
 interface Card {
@@ -198,6 +199,34 @@ export class ReplayService {
       if (!player1 || !player2) {
         throw new Error('Player not found');
       }
+      
+      // Get all RPS choices for both players
+      const rpsChoices = await prisma.rpsChoice.findMany({
+        where: {
+          replayId: replay.id
+        },
+        orderBy: {
+          createdAt: 'asc'
+        }
+      });
+      
+      // Get player1's and player2's RPS choices
+      const player1RpsData = rpsChoices
+        .filter(choice => choice.playerId === player1.id)
+        .map(choice => ({
+          playerId: player1.id,
+          choice: choice.choice,
+          won: choice.won
+        }));
+        
+      const player2RpsData = rpsChoices
+        .filter(choice => choice.playerId === player2.id)
+        .map(choice => ({
+          playerId: player2.id,
+          choice: choice.choice,
+          won: choice.won
+        }));
+      
       const decks1 = await prisma.deck.findMany({
         where: {
           replayId: replay.id,
@@ -253,20 +282,11 @@ export class ReplayService {
       });
       console.log('decks1Cards');
       console.log(decks1Cards[0].cards);
-      const rpsChoices = await prisma.rpsChoice.findMany({
-        where: {
-          replayId: replay.id
-        }
-      });
       const ret = {
         url,
         player1: {
           dbName: player1.dbName,
-          rpsData: {
-            playerId: player1.playerId,
-            choice: rpsChoices.find(choice => choice.playerId === player1.id)?.choice || '',
-            won: rpsChoices.find(choice => choice.playerId === player1.id)?.won || false
-          },
+          rpsData: player1RpsData,
           decks: decks1.map(deck => {
             return {
               id: deck.id,
@@ -278,11 +298,7 @@ export class ReplayService {
         },
         player2: {
           dbName: player2.dbName,
-          rpsData: {
-            playerId: player2.playerId,
-            choice: rpsChoices.find(choice => choice.playerId === player2.id)?.choice || '',
-            won: rpsChoices.find(choice => choice.playerId === player2.id)?.won || false
-          },
+          rpsData: player2RpsData,
           decks: decks2.map(deck => {
             return {
               id: deck.id,
@@ -480,9 +496,40 @@ export class ReplayService {
       if (!replayJson) {
         throw new Error('No replay data found');
       }
-      const { analysis, rpsPlay } = this.analyzeReplayData(replayJson);
-      if (!rpsPlay) {
-        throw new Error('No RPS play found in replay');
+      
+      // Parse the replayJson to extract the date
+      const parsedReplay = JSON.parse(replayJson);
+      let dbCreatedAt = null;
+      
+      // Extract the date if it exists - check multiple possible locations
+      if (parsedReplay.date) {
+        try {
+          // The date format is typically "YYYY-MM-DD HH:MM:SS"
+          dbCreatedAt = new Date(parsedReplay.date);
+          console.log(`[REPLAY_SERVICE] Extracted date from replay: ${parsedReplay.date}, parsed as: ${dbCreatedAt.toISOString()}`);
+        } catch (error) {
+          console.error(`[REPLAY_SERVICE] Error parsing date: ${parsedReplay.date}`, error);
+        }
+      } else if (parsedReplay.meta?.date) {
+        try {
+          dbCreatedAt = new Date(parsedReplay.meta.date);
+          console.log(`[REPLAY_SERVICE] Extracted date from replay.meta: ${parsedReplay.meta.date}, parsed as: ${dbCreatedAt.toISOString()}`);
+        } catch (error) {
+          console.error(`[REPLAY_SERVICE] Error parsing meta date: ${parsedReplay.meta.date}`, error);
+        }
+      } else if (parsedReplay.timestamp) {
+        try {
+          // Try handling if it's stored as a timestamp
+          dbCreatedAt = new Date(Number(parsedReplay.timestamp));
+          console.log(`[REPLAY_SERVICE] Extracted timestamp from replay: ${parsedReplay.timestamp}, parsed as: ${dbCreatedAt.toISOString()}`);
+        } catch (error) {
+          console.error(`[REPLAY_SERVICE] Error parsing timestamp: ${parsedReplay.timestamp}`, error);
+        }
+      }
+      
+      const { analysis, rpsPlays } = this.analyzeReplayData(replayJson);
+      if (!rpsPlays || rpsPlays.length === 0) {
+        throw new Error('No RPS plays found in replay');
       }
 
       const session = await this.getSession(sessionId);
@@ -527,7 +574,21 @@ export class ReplayService {
           
           if (existingReplay) {
             console.log(`Found existing replay: ${existingReplay.id}`);
-            replay = existingReplay;
+            
+            // Update the dbCreatedAt field if it's not set and we have a valid date
+            if (dbCreatedAt && existingReplay && existingReplay.hasOwnProperty('dbCreatedAt')) {
+              // Use proper type assertion
+              replay = await prisma.replay.update({
+                where: { id: existingReplay.id },
+                data: { 
+                  // Use a proper type casting approach instead of ts-ignore
+                  createdAt: dbCreatedAt
+                }
+              });
+              console.log(`Updated existing replay with date: ${dbCreatedAt.toISOString()}`);
+            } else {
+              replay = existingReplay;
+            }
           }
         }
         
@@ -540,17 +601,33 @@ export class ReplayService {
           
           if (checkReplay) {
             replay = checkReplay;
+            
+            // Update the dbCreatedAt field if it's not set and we have a valid date
+            if (dbCreatedAt && checkReplay && checkReplay.hasOwnProperty('dbCreatedAt')) {
+              // Use proper type assertion
+              replay = await prisma.replay.update({
+                where: { id: checkReplay.id },
+                data: { 
+                  // Use a proper type casting approach instead of ts-ignore
+                  createdAt: dbCreatedAt
+                }
+              });
+              console.log(`Updated existing replay with date: ${dbCreatedAt.toISOString()}`);
+            }
           } else {
-            // Update replay with player info
+            // Create replay with player info and date
             replay = await prisma.replay.create({
               data: {
                 replayUrl: url,
                 sessionId: session.id,
                 player1Id: player1.id,
                 player2Id: player2.id,
-                winnerPlayerId: analysis.player1.won ? player1.id : player2.id
+                winnerPlayerId: analysis.player1.won ? player1.id : player2.id,
+                // Use createdAt instead of dbCreatedAt
+                createdAt: dbCreatedAt || new Date()
               }
             });
+            console.log(`Created new replay with date: ${dbCreatedAt ? dbCreatedAt.toISOString() : 'NULL'}`);
           }
         }
       } finally {
@@ -579,11 +656,34 @@ export class ReplayService {
 
       // The replay should be created with session.id
 
-      // save rps choices
-      await this.storeRpsChoices(replay.id, playerInfo, rpsPlay);
+      // save ALL rps choices
+      await this.storeRpsChoices(replay.id, playerInfo, rpsPlays);
+      
       // Store deck data for both players
       const decks = await Promise.all([this.storeDeckForPlayer(replay.id, analysis.player1, player1.id, analysis.player2), this.storeDeckForPlayer(replay.id, analysis.player2, player2.id, analysis.player1)]);
+      
+      // Get all RPS choices for each player
+      const player1RpsChoices = await prisma.rpsChoice.findMany({
+        where: {
+          replayId: replay.id,
+          playerId: player1.id
+        },
+        orderBy: {
+          createdAt: 'asc' // Order by creation time to maintain sequence
+        }
+      });
+      
+      const player2RpsChoices = await prisma.rpsChoice.findMany({
+        where: {
+          replayId: replay.id,
+          playerId: player2.id
+        },
+        orderBy: {
+          createdAt: 'asc' // Order by creation time to maintain sequence
+        }
+      });
 
+      // Get YGO card info and transform decks
       const ygoCardInfo = await this.getYgoCardInfo(decks);
       const decksWithYgoInfo: DeckWithCards[][] = decks.map(deck => {
         return deck.map(deck => ({
@@ -593,26 +693,33 @@ export class ReplayService {
           cards: this.mapCardsToYgoInfo(deck.cards, ygoCardInfo)
         }));
       })
+      
+      // Convert the RPS choices to the format needed for the response
+      const player1RpsData = player1RpsChoices.map(choice => ({
+        playerId: player1.id,
+        choice: choice.choice,
+        won: choice.won
+      }));
+      
+      const player2RpsData = player2RpsChoices.map(choice => ({
+        playerId: player2.id,
+        choice: choice.choice,
+        won: choice.won
+      }));
+      
       return {
         url,
         player1: {
           dbName: analysis.player1.dbName,
-          rpsData: {
-            playerId: analysis.player1.userId,
-            choice: analysis.rpsChoices[analysis.player1.dbName].choice,
-            won: analysis.rpsChoices[analysis.player1.dbName].won
-          },
+          rpsData: player1RpsData,
           decks: decksWithYgoInfo[0]
         },
         player2: {
           dbName: analysis.player2.dbName,
-          rpsData: {
-            playerId: analysis.player2.userId,
-            choice: analysis.rpsChoices[analysis.player2.dbName].choice,
-            won: analysis.rpsChoices[analysis.player2.dbName].won
-          },
+          rpsData: player2RpsData,
           decks: decksWithYgoInfo[1]
-        }
+        },
+        dbCreatedAt: replay.createdAt
       }
     } catch (error) {
       console.error('Error storing analysis:', error);
@@ -630,9 +737,9 @@ export class ReplayService {
     }));
   }
 
-  async storeRpsChoices(replayId: string, playerInfo: PlayerInfo, rpsPlay: RPSPlay) {
-    if (!rpsPlay) {
-      throw new Error('No RPS play found in replay');
+  async storeRpsChoices(replayId: string, playerInfo: PlayerInfo, rpsPlays: RPSPlay[]) {
+    if (!rpsPlays || rpsPlays.length === 0) {
+      throw new Error('No RPS plays found in replay');
     }
 
     const doesMoveWin = (move: string, againstMove: string): boolean => {
@@ -650,25 +757,31 @@ export class ReplayService {
       return doesMoveWin(move, opponentMove);
     };
 
-    const rpsPlayer1 = await prisma.rpsChoice.create({
-      data: {
-        playerId: playerInfo.player1.id,
-        replayId: replayId,
-        choice: rpsPlay.player1_choice,
-        won: inferRpsWinner(rpsPlay, "player1")
-      }
-    });
+    // Store all RPS plays
+    const results = [];
+    for (const rpsPlay of rpsPlays) {
+      const rpsPlayer1 = await prisma.rpsChoice.create({
+        data: {
+          playerId: playerInfo.player1.id,
+          replayId: replayId,
+          choice: rpsPlay.player1_choice,
+          won: inferRpsWinner(rpsPlay, "player1")
+        }
+      });
 
-    const rpsPlayer2 = await prisma.rpsChoice.create({
-      data: {
-        playerId: playerInfo.player2.id,
-        replayId: replayId,
-        choice: rpsPlay.player2_choice,
-        won: inferRpsWinner(rpsPlay, "player2")
-      }
-    });
+      const rpsPlayer2 = await prisma.rpsChoice.create({
+        data: {
+          playerId: playerInfo.player2.id,
+          replayId: replayId,
+          choice: rpsPlay.player2_choice,
+          won: inferRpsWinner(rpsPlay, "player2")
+        }
+      });
+      
+      results.push({ rpsPlayer1, rpsPlayer2 });
+    }
 
-    return { rpsPlayer1, rpsPlayer2 };
+    return results;
   }
 
   async storePlayers(playerInfo: PlayerInfo) {
@@ -821,7 +934,7 @@ export class ReplayService {
   }
 
   
-  analyzeReplayData(replayData: string): { analysis: DeckAnalysis, rpsPlay: RPSPlay | undefined } {
+  analyzeReplayData(replayData: string): { analysis: DeckAnalysis, rpsPlays: RPSPlay[] } {
     const data = JSON.parse(replayData);
     if (!data) {
       throw new Error('No data found in replay');
@@ -841,8 +954,7 @@ export class ReplayService {
     // console.log('printing player info end');
     let currentGame = 0;
     const lastSeenCards: { [id: number]: { serialNumber: string, name: string } } = {};
-    const rpsChoices: PlayerRPSTracker = {};
-    let rpsPlay: RPSPlay | undefined;
+    const allRpsPlays: RPSPlay[] = [];
     
     const analysis: DeckAnalysis = {
       player1: {
@@ -971,33 +1083,22 @@ export class ReplayService {
       }
   
       if (play.play === "RPS") {
-        rpsPlay = play;
+        // Collect all RPS plays
+        allRpsPlays.push(play);
+        
+        // Use the last RPS play for analysis (we're still tracking all plays)
         const player1Choice = play.player1_choice;
         const player2Choice = play.player2_choice;
         const winner = play.winner;
   
-        // Track player1's choice
-        if (!rpsChoices[play.player1]) {
-          analysis.rpsChoices[play.player1] = {
-            choice: player1Choice,
-            opponent: play.player2,
-            won: winner === play.player1
-          };
-        }
+        // Track player1's choice - always update with latest
         analysis.rpsChoices[play.player1] = {
           choice: player1Choice,
           opponent: play.player2,
           won: winner === play.player1
         };
   
-        // Track player2's choice
-        if (!rpsChoices[play.player2]) {
-          analysis.rpsChoices[play.player2] = {
-            choice: player2Choice,
-            opponent: play.player1,
-            won: winner === play.player2
-          };
-        }
+        // Track player2's choice - always update with latest
         analysis.rpsChoices[play.player2] = {
           choice: player2Choice,
           opponent: play.player1,
@@ -1055,7 +1156,13 @@ export class ReplayService {
         }
       }
     }
-    return { analysis, rpsPlay };
+
+    // Log found RPS plays
+    if (allRpsPlays.length > 1) {
+      console.log(`Found ${allRpsPlays.length} RPS plays in replay.`);
+    }
+
+    return { analysis, rpsPlays: allRpsPlays };
   }
 
   async getYgoCardInfo(decks: any[][]) {

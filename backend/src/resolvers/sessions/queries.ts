@@ -125,82 +125,59 @@ export const sessionDetails = async (_: any, { id }: { id: string }) => {
 
   const transformedReplays = replays.map(replay => {
     const decksByPlayerId = new Map();
+  
     
-    console.log(`\n[SESSION_DETAILS] ==========================================`);
-    console.log(`[SESSION_DETAILS] Processing replay ${replay.id}`);
-    console.log(`[SESSION_DETAILS] Replay URL: ${replay.replayUrl}`);
-    console.log(`[SESSION_DETAILS] Players: ${replay.player1.dbName} vs ${replay.player2.dbName}`);
-    
-    replay.decks.forEach(deck => {
-        console.log(`\n[SESSION_DETAILS] Found deck in replay:`);
-        console.log(`  Deck ID: ${deck.id}`);
-        console.log(`  Player ID: ${deck.playerId}`);
-        console.log(`  Player Name: ${deck.player.dbName}`);
-        console.log(`  Game Number: ${deck.gameNumber}`);
-        console.log(`  Deck Name: ${deck.name}`);
-        console.log(`  Card Count: ${deck.cards.length}`);
-        console.log(`  Cards: ${deck.cards.map(c => c.card.name).join(', ')}`);
-        
-        if (!decksByPlayerId.has(deck.playerId)) {
-            decksByPlayerId.set(deck.playerId, []);
-        }
-        
-        const transformedCards = deck.cards.map(cardEntry => ({
-            serialNumber: cardEntry.card.serialNumber,
-            name: cardEntry.card.name,
-            imageUrl: cardEntry.card.imageUrl,
-            copies: cardEntry.copiesOfCard,
-            ygoInfo: ygoInfoMap[cardEntry.card.serialNumber] || null
-        }));
-        
-        decksByPlayerId.get(deck.playerId).push({
-            ...deck,
-            cards: transformedCards
-        });
+    replay.decks.forEach((deck: any) => {
+      const playerId = deck.playerId;
+      if (!decksByPlayerId.has(playerId)) {
+        decksByPlayerId.set(playerId, []);
+      }
+      const cards = deck.cards.map((cardEntry: any) => ({
+        serialNumber: cardEntry.card.serialNumber,
+        name: cardEntry.card.name,
+        imageUrl: cardEntry.card.imageUrl,
+        copies: cardEntry.copiesOfCard,
+        ygoInfo: ygoInfoMap[cardEntry.card.serialNumber] || null
+      }));
+      
+      decksByPlayerId.get(playerId).push({
+        ...deck,
+        cards: cards
+      });
     });
 
-    console.log(`\n[SESSION_DETAILS] Final deck assignments for replay ${replay.id}:`);
-    console.log(`  Player1 (${replay.player1.dbName}):`);
-    const player1Decks = decksByPlayerId.get(replay.player1.id) || [];
-    player1Decks.forEach(deck => {
-        console.log(`    - Game ${deck.gameNumber}: ${deck.name} (${deck.cards.length} cards)`);
-    });
+    // Get RPS choices for both players
+    const player1RpsChoices = replay.player1.rpsChoices
+      .filter(choice => choice.replayId === replay.id)
+      .map(choice => ({
+        playerId: choice.playerId,
+        choice: choice.choice,
+        won: choice.won
+      }));
     
-    console.log(`  Player2 (${replay.player2.dbName}):`);
-    const player2Decks = decksByPlayerId.get(replay.player2.id) || [];
-    player2Decks.forEach(deck => {
-        console.log(`    - Game ${deck.gameNumber}: ${deck.name} (${deck.cards.length} cards)`);
-    });
-
-    const player1RpsChoice = replay.player1.rpsChoices.find(
-      choice => choice.replayId === replay.id
-    );
-    
-    const player2RpsChoice = replay.player2.rpsChoices.find(
-      choice => choice.replayId === replay.id
-    );
+    const player2RpsChoices = replay.player2.rpsChoices
+      .filter(choice => choice.replayId === replay.id)
+      .map(choice => ({
+        playerId: choice.playerId,
+        choice: choice.choice,
+        won: choice.won
+      }));
 
     return {
       id: replay.id,
       replayUrl: replay.replayUrl,
+      createdAt: replay.createdAt.toString(),
+      dbCreatedAt: replay.createdAt,
       player1: {
         id: replay.player1.id,
         dbName: replay.player1.dbName,
-        rpsData: player1RpsChoice ? {
-          playerId: player1RpsChoice.playerId,
-          choice: player1RpsChoice.choice,
-          won: player1RpsChoice.won
-        } : null,
+        rpsData: player1RpsChoices.length > 0 ? player1RpsChoices : null,
         decks: decksByPlayerId.get(replay.player1.id) || []
       },
       player2: {
         id: replay.player2.id,
         dbName: replay.player2.dbName,
-        rpsData: player2RpsChoice ? {
-          playerId: player2RpsChoice.playerId,
-          choice: player2RpsChoice.choice,
-          won: player2RpsChoice.won
-        } : null,
+        rpsData: player2RpsChoices.length > 0 ? player2RpsChoices : null,
         decks: decksByPlayerId.get(replay.player2.id) || []
       }
     };
@@ -387,26 +364,42 @@ export const sessionPlayerDecks = async (_: any, { sessionId, playerDbName }: { 
 
     console.log('\n[SESSION_PLAYER_DECKS] 🔄 Transforming replays...');
     const transformedReplays = replays.map(replay => {
-      const player = replay.player1.dbName === playerDbName ? replay.player1 : replay.player2;
-      const rpsChoice = player.rpsChoices.find(choice => choice.replayId === replay.id);
-
-      console.log(`[SESSION_PLAYER_DECKS] Transforming replay ${replay.id}:`, {
-        player: player.dbName,
-        deckCount: replay.decks.length,
-        hasRpsChoice: !!rpsChoice
-      });
-
-      const result = {
+      const replayWithPlayer = replay.player1.dbName === playerDbName ? replay.player1 : replay.player2;
+      const rpsChoices = replayWithPlayer.rpsChoices
+        .filter(choice => choice.replayId === replay.id)
+        .map(choice => ({
+          playerId: choice.playerId,
+          choice: choice.choice,
+          won: choice.won
+        }));
+      
+      return {
         id: replay.id,
         replayUrl: replay.replayUrl,
+        createdAt: replay.createdAt.toString(),
+        dbCreatedAt: replay.createdAt,
         player1: {
-          id: player.id,
-          dbName: player.dbName,
-          rpsData: rpsChoice ? {
-            playerId: rpsChoice.playerId,
-            choice: rpsChoice.choice,
-            won: rpsChoice.won
-          } : null,
+          id: replay.player1.id,
+          dbName: replay.player1.dbName,
+          rpsData: replay.player1.dbName === playerDbName ? rpsChoices : null,
+          decks: replay.decks.map(deck => ({
+            id: deck.id,
+            playerId: deck.playerId,
+            name: deck.name || 'Unknown Deck',
+            gameNumber: deck.gameNumber || 1,
+            cards: deck.cards.map(cardEntry => ({
+              serialNumber: cardEntry.card.serialNumber,
+              name: cardEntry.card.name || 'Unknown Card',
+              imageUrl: cardEntry.card.imageUrl || '',
+              copies: cardEntry.copiesOfCard || 1,
+              ygoInfo: ygoInfoMap[cardEntry.card.serialNumber] || null
+            }))
+          }))
+        },
+        player2: {
+          id: replay.player2.id,
+          dbName: replay.player2.dbName,
+          rpsData: replay.player2.dbName === playerDbName ? rpsChoices : null,
           decks: replay.decks.map(deck => ({
             id: deck.id,
             playerId: deck.playerId,
@@ -422,15 +415,6 @@ export const sessionPlayerDecks = async (_: any, { sessionId, playerDbName }: { 
           }))
         }
       };
-
-      console.log(`[SESSION_PLAYER_DECKS] Transformed replay result:`, {
-        id: result.id,
-        url: result.replayUrl,
-        deckCount: result.player1.decks.length,
-        cardCounts: result.player1.decks.map(d => d.cards.length)
-      });
-
-      return result;
     });
 
     console.log(`\n[SESSION_PLAYER_DECKS] ✅ SUCCESS - Returning ${transformedReplays.length} replays`);
